@@ -37,7 +37,13 @@ export interface CrudRoutes {
 
 }
 export interface CrudOptions {
-  routes?: CrudRoutes
+  routes?: CrudRoutes,
+  filterSecurity?:boolean,
+  filterSecurityGroupModel?:any,
+  filterSecurityFunction?:any,
+  filterSecurityHeaderCookieOption?:boolean,
+  filterSecurityHeaderKey?:string,
+  filterSecurityExtractToken?:any
 }
 export interface OptionItem {
   text: string
@@ -156,7 +162,8 @@ export interface AvueCrudConfig {
 
 export interface CrudOptionsWithModel extends CrudOptions {
   name?: string | string[],
-  model: any
+  model: any,
+  filterSecurityGroupModel?: any,
   fields?: Fields
   config?: ((instance?: any) => AvueCrudConfig | Promise<AvueCrudConfig>) | AvueCrudConfig
 }

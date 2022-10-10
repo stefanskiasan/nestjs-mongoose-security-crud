@@ -45,7 +45,8 @@ export class CrudController {
     required: false,
     description: "Query options"
   })
-  find(@CrudQuery("query") query: ICrudQuery = {}) {
+  find(@Req() Req,@CrudQuery("query") query: ICrudQuery = {}) {
+    console.log(this.crudOptions.routes.find);
     let {
       where = get(this.crudOptions, "routes.find.where", {}),
       limit = get(this.crudOptions, "routes.find.limit", 10),
@@ -67,7 +68,47 @@ export class CrudController {
     );
 
     const find = async () => {
-      const data = await this.model
+      if (this.crudOptions.filterSecurity){
+        if (this.crudOptions.filterSecurity === true){
+          let token = "";
+          let userId = "";
+          if(this.crudOptions.filterSecurityHeaderCookieOption === true) {
+            token = getValueFromCookie(Req.headers.cookie)[this.crudOptions.filterSecurityHeaderKey];
+          } else {
+            token = Req.headers[this.crudOptions.filterSecurityHeaderKey];
+          }
+          userId = this.crudOptions.filterSecurityExtractToken(token);
+
+          let dataGroup = await  this['groupService'].model.find().where({
+            members:userId
+          })
+          let listReaderRoles = [];
+          dataGroup.forEach((dataItem) => {
+              dataItem.permissions.forEach((permission) => {
+                if(listReaderRoles.includes((dataSubItem) => {
+                  return dataSubItem === permission;
+                }) === false){
+                  listReaderRoles.push(permission);
+                }
+              });
+          });
+          where['$or'] = [
+              {
+                'permissionReaderUserId':userId
+              },
+            {
+              'permissionReaderRoles': {
+                "$in":listReaderRoles
+              }
+            }
+          ];
+
+          if (this.crudOptions.filterSecurityFunction){
+            where = this.crudOptions.filterSecurityFunction(where,userId);
+          }
+        }
+      }
+      let data = await this.model
         .find()
         .where(where)
         .skip(skip)
@@ -75,6 +116,7 @@ export class CrudController {
         .sort(sort)
         .populate(populate)
         .collation(collation);
+
       if (paginateKeys !== false) {
         const total = await this.model.countDocuments(where);
         return {
@@ -84,6 +126,7 @@ export class CrudController {
           [paginateKeys.currentPage]: page
         };
       }
+
       return data;
     };
     return find();
@@ -133,4 +176,19 @@ export class CrudController {
   delete(@Param("id") id: string) {
     return this.model.findOneAndRemove({ _id: id });
   }
+
+
+}
+function getValueFromCookie (cookieHeader) {
+  const list = {};
+  if (!cookieHeader) return list;
+  cookieHeader.split(`;`).forEach(function (cookie) {
+    let [name, ...rest] = cookie.split(`=`);
+    name = name?.trim();
+    if (!name) return;
+    const value = rest.join(`=`).trim();
+    if (!value) return;
+    list[name] = decodeURIComponent(value);
+  });
+  return list;
 }

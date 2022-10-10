@@ -30,6 +30,7 @@ const UserModel = mongoose.model(
 describe("CrudController e2e", () => {
   @Crud({
     model: UserModel,
+    filterSecurityGroupModel: UserModel
   })
   @Controller("/users")
   class UserController {

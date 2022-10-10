@@ -1,5 +1,6 @@
 import { CrudOptions } from "./crud.interface";
 import { get, merge } from 'lodash'
+import jwt_decode from "jwt-decode";
 
 export const defaultPaginate = {
   data: 'data',
@@ -12,10 +13,15 @@ export class CrudConfig {
   public static options: CrudOptions = {
     routes: {
       find: {
-        paginate: { ...defaultPaginate }
+        paginate: {...defaultPaginate}
       }
-    }
-  };
+    },
+    filterSecurity: false,
+    filterSecurityHeaderCookieOption: true,
+    filterSecurityHeaderKey: 'Authorization',
+    filterSecurityExtractToken: (token) => { return jwt_decode(token)['_id'];}
+  }
+  ;
   static setup(options: CrudOptions) {
     this.options = merge({}, this.options, options);
   }

@@ -1,7 +1,7 @@
 {
-  "name": "nestjs-mongoose-crud",
+  "name": "nestjs-mongoose-security-crud",
   "description": "mongoose restful crud api for nest.js",
-  "version": "2.1.2",
+  "version": "0.8.0",
   "main": "dist/main.js",
   "typings": "dist/main.d.ts",
   "license": "MIT",
@@ -31,6 +31,7 @@
     "ts-jest": "^26.5.2",
     "typescript": "^4.2.2"
   },
-  "peerDependencies": {},
-  "dependencies": {}
+  "dependencies": {
+    "jwt-decode": "^3.1.2"
+  }
 }
