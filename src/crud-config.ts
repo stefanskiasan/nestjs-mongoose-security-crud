@@ -19,7 +19,8 @@ export class CrudConfig {
     filterSecurity: false,
     filterSecurityHeaderCookieOption: true,
     filterSecurityHeaderKey: 'Authorization',
-    filterSecurityExtractToken: (token) => { return jwt_decode(token)['_id'];}
+    filterSecurityExtractToken: (token) => { return jwt_decode(token)['userId'];},
+    filterSecurityPropertiesRoles: {}
   }
   ;
   static setup(options: CrudOptions) {

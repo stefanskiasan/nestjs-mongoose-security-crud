@@ -46,7 +46,7 @@ export class CrudController {
     description: "Query options"
   })
   find(@Req() Req,@CrudQuery("query") query: ICrudQuery = {}) {
-    console.log(this.crudOptions.routes.find);
+
     let {
       where = get(this.crudOptions, "routes.find.where", {}),
       limit = get(this.crudOptions, "routes.find.limit", 10),
@@ -56,6 +56,11 @@ export class CrudController {
       sort = get(this.crudOptions, "routes.find.sort", undefined),
       collation = undefined
     } = query;
+
+    let select = '';
+    if(Req.query.select) {
+      select = Req.query.select;
+    }
 
     if (skip < 1) {
       skip = (page - 1) * limit;
@@ -70,47 +75,15 @@ export class CrudController {
     const find = async () => {
       if (this.crudOptions.filterSecurity){
         if (this.crudOptions.filterSecurity === true){
-          let token = "";
-          let userId = "";
-          if(this.crudOptions.filterSecurityHeaderCookieOption === true) {
-            token = getValueFromCookie(Req.headers.cookie)[this.crudOptions.filterSecurityHeaderKey];
-          } else {
-            token = Req.headers[this.crudOptions.filterSecurityHeaderKey];
-          }
-          userId = this.crudOptions.filterSecurityExtractToken(token);
 
-          let dataGroup = await  this['groupService'].model.find().where({
-            members:userId
-          })
-          let listReaderRoles = [];
-          dataGroup.forEach((dataItem) => {
-              dataItem.permissions.forEach((permission) => {
-                if(listReaderRoles.includes((dataSubItem) => {
-                  return dataSubItem === permission;
-                }) === false){
-                  listReaderRoles.push(permission);
-                }
-              });
-          });
-          where['$or'] = [
-              {
-                'permissionReaderUserId':userId
-              },
-            {
-              'permissionReaderRoles': {
-                "$in":listReaderRoles
-              }
-            }
-          ];
-
-          if (this.crudOptions.filterSecurityFunction){
-            where = this.crudOptions.filterSecurityFunction(where,userId);
-          }
+          where = await filterSecurityFunctionAll(where,Req, this);
+          select = await checkPropertyPermissions(select, Req, this);
         }
       }
       let data = await this.model
         .find()
         .where(where)
+        .select(select)
         .skip(skip)
         .limit(limit)
         .sort(sort)
@@ -134,47 +107,88 @@ export class CrudController {
 
   @Get(":id")
   @ApiOperation({ summary: "Find a record" })
-  findOne(@Param("id") id: string, @CrudQuery("query") query: ICrudQuery = {}) {
+  async findOne(@Req() Req,@Param("id") id: string, @CrudQuery("query") query: ICrudQuery = {}) {
     let {
       where = get(this.crudOptions, "routes.findOne.where", {}),
       populate = get(this.crudOptions, "routes.findOne.populate", undefined),
       select = get(this.crudOptions, "routes.findOne.select", null)
     } = query;
-    return this.model
-      .findById(id)
-      .populate(populate)
-      .select(select)
-      .where(where);
+    if (this.crudOptions.filterSecurity){
+      if (this.crudOptions.filterSecurity === true){
+        where = await filterSecurityFunctionOne(where,Req, this);
+        select = await checkPropertyPermissions(select, Req, this);
+      }
+    }
+    const data = this.model
+        .findById(id)
+        .populate(populate)
+        .select(select)
+        .where(where);
+    if(data){
+      return data;
+    } else {
+      return "Permission denied";
+    }
   }
 
   @Post()
   @ApiOperation({ summary: "Create a record" })
-  create(@Body() body: CrudPlaceholderDto) {
+  async create(@Req() Req,@Body() body: CrudPlaceholderDto) {
     const transform = get(this.crudOptions, "routes.create.transform");
     if (transform) {
       body = transform(body);
     }
-    return this.model.create(body);
+    if (this.crudOptions.filterSecurity){
+      if (this.crudOptions.filterSecurity === true){
+        if(await checkCreatePermissions(Req, this) === true) {
+          return this.model.create(body);
+        } else {
+          return "Permission denied";
+        }
+      }
+    } else {
+      return this.model.create(body);
+    }
   }
 
   @Put(":id")
   @ApiOperation({ summary: "Update a record" })
-  update(@Param("id") id: string, @Body() body: CrudPlaceholderDto) {
+ async update(@Req() Req, @Param("id") id: string, @Body() body: CrudPlaceholderDto) {
     const transform = get(this.crudOptions, "routes.update.transform");
     if (transform) {
       body = transform(body);
     }
-    return this.model.findOneAndUpdate({ _id: id }, body, {
-      new: true,
-      upsert: false,
-      runValidators: true
-    });
+    if (this.crudOptions.filterSecurity){
+      if(await checkUpdatePermissions(Req, this, id) === true) {
+        return this.model.findOneAndUpdate({ _id: id }, body, {
+          new: true,
+          upsert: false,
+          runValidators: true
+        });
+      } else {
+        return "Permission denied";
+      }
+    } else {
+      return this.model.findOneAndUpdate({ _id: id }, body, {
+        new: true,
+        upsert: false,
+        runValidators: true
+      });
+    }
   }
 
   @Delete(":id")
   @ApiOperation({ summary: "Delete a record" })
-  delete(@Param("id") id: string) {
-    return this.model.findOneAndRemove({ _id: id });
+  async delete(@Req() Req,@Param("id") id: string) {
+    if (this.crudOptions.filterSecurity){
+      if(await checkDeletePermissions(Req, this, id) === true) {
+        return this.model.findOneAndRemove({ _id: id });
+      } else {
+        return "Permission denied";
+      }
+    } else{
+      return this.model.findOneAndRemove({ _id: id });
+    }
   }
 
 
@@ -191,4 +205,249 @@ function getValueFromCookie (cookieHeader) {
     list[name] = decodeURIComponent(value);
   });
   return list;
+}
+async function  filterSecurityFunctionAll(where, Req, that){
+  let token = "";
+  let userId = "";
+  if(that.crudOptions.filterSecurityHeaderCookieOption === true) {
+    token = getValueFromCookie(Req.headers.cookie)[that.crudOptions.filterSecurityHeaderKey];
+  } else {
+    token = Req.headers[that.crudOptions.filterSecurityHeaderKey];
+  }
+  userId = that.crudOptions.filterSecurityExtractToken(token);
+
+  let dataGroup = await  that['groupService'].model.find().where({
+    members:userId
+  })
+  let listReaderRoles = [];
+  dataGroup.forEach((dataItem) => {
+    dataItem.permissions.forEach((permission) => {
+      if(listReaderRoles.includes((dataSubItem) => {
+        return dataSubItem === permission;
+      }) === false){
+        listReaderRoles.push(permission);
+      }
+    });
+  });
+
+  where['$or'] = [
+    {
+      'permissionReaderUserId':userId
+    },
+    {
+      'permissionReaderRoles': {
+        "$in":listReaderRoles
+      }
+    }
+  ];
+
+  if (that.crudOptions.filterSecurityFunction){
+    where = that.crudOptions.filterSecurityFunction(where,userId);
+  }
+  if( that.crudOptions.filterSecurityFindAllFunction){
+    where = that.crudOptions.filterSecurityFindAllFunction(where,userId,listReaderRoles);
+  }
+  return where;
+}
+async function  filterSecurityFunctionOne(where, Req, that){
+  let token = "";
+  let userId = "";
+  if(that.crudOptions.filterSecurityHeaderCookieOption === true) {
+    token = getValueFromCookie(Req.headers.cookie)[that.crudOptions.filterSecurityHeaderKey];
+  } else {
+    token = Req.headers[that.crudOptions.filterSecurityHeaderKey];
+  }
+  userId = that.crudOptions.filterSecurityExtractToken(token);
+
+  let dataGroup = await  that['groupService'].model.find().where({
+    members:userId
+  })
+  let listReaderRoles = [];
+  dataGroup.forEach((dataItem) => {
+    dataItem.permissions.forEach((permission) => {
+      if(listReaderRoles.includes((dataSubItem) => {
+        return dataSubItem === permission;
+      }) === false){
+        listReaderRoles.push(permission);
+      }
+    });
+  });
+
+  where['$or'] = [
+    {
+      'permissionReaderUserId':userId
+    },
+    {
+      'permissionReaderRoles': {
+        "$in":listReaderRoles
+      }
+    }
+  ];
+
+  if (that.crudOptions.filterSecurityFunction){
+    where = that.crudOptions.filterSecurityFunction(where,userId);
+  }
+  if( that.crudOptions.filterSecurityFindOneFunction){
+    where = that.crudOptions.filterSecurityFindOneFunction(where,userId,listReaderRoles);
+  }
+  return where;
+}
+async function checkCreatePermissions(Req, that){
+  let token = "";
+  let userId = "";
+  let createExampleModel = new that.model();
+
+  if(that.crudOptions.filterSecurityHeaderCookieOption === true) {
+    token = getValueFromCookie(Req.headers.cookie)[that.crudOptions.filterSecurityHeaderKey];
+  } else {
+    token = Req.headers[that.crudOptions.filterSecurityHeaderKey];
+  }
+  userId = that.crudOptions.filterSecurityExtractToken(token);
+
+  let dataGroup = await  that['groupService'].model.find().where({
+    members:userId
+  })
+  let listReaderRoles = [];
+  dataGroup.forEach((dataItem) => {
+    dataItem.permissions.forEach((permission) => {
+      if(listReaderRoles.includes((dataSubItem) => {
+        return dataSubItem === permission;
+      }) === false){
+        listReaderRoles.push(permission);
+      }
+    });
+  });
+  let permissionWriterRoles = false;
+  listReaderRoles.forEach((dataItem) => {
+    if(createExampleModel.permissionWriterRoles.includes(dataItem) === true) {
+      permissionWriterRoles = true;
+    }
+  });
+  if(that.crudOptions.filterSecurityCreateFunction) {
+    permissionWriterRoles = that.crudOptions.filterSecurityCreateFunction(userId,permissionWriterRoles)
+  }
+
+  return permissionWriterRoles;
+}
+async function checkUpdatePermissions(Req, that, id) {
+  let token = "";
+  let userId = "";
+  const data = await that.model
+      .findById(id);
+  if(that.crudOptions.filterSecurityHeaderCookieOption === true) {
+    token = getValueFromCookie(Req.headers.cookie)[that.crudOptions.filterSecurityHeaderKey];
+  } else {
+    token = Req.headers[that.crudOptions.filterSecurityHeaderKey];
+  }
+  userId = that.crudOptions.filterSecurityExtractToken(token);
+
+  let dataGroup = await  that['groupService'].model.find().where({
+    members:userId
+  })
+  let listReaderRoles = [];
+  dataGroup.forEach((dataItem) => {
+    dataItem.permissions.forEach((permission) => {
+      if(listReaderRoles.includes((dataSubItem) => {
+        return dataSubItem === permission;
+      }) === false){
+        listReaderRoles.push(permission);
+      }
+    });
+  });
+  let permissionWriterRoles = false;
+  if(data.permissionWriterUserId.includes(userId) === true) {
+    permissionWriterRoles = true;
+  }
+  listReaderRoles.forEach((dataItem) => {
+    if(data.permissionWriterRoles.includes(dataItem) === true) {
+      permissionWriterRoles = true;
+    }
+  });
+  if(that.crudOptions.filterSecurityUpdateFunction) {
+    permissionWriterRoles = that.crudOptions.filterSecurityUpdateFunction(userId,permissionWriterRoles)
+  }
+  return permissionWriterRoles;
+}
+async function checkDeletePermissions(Req, that,id) {
+  let token = "";
+  let userId = "";
+  const data = await that.model
+      .findById(id);
+  if(that.crudOptions.filterSecurityHeaderCookieOption === true) {
+    token = getValueFromCookie(Req.headers.cookie)[that.crudOptions.filterSecurityHeaderKey];
+  } else {
+    token = Req.headers[that.crudOptions.filterSecurityHeaderKey];
+  }
+  userId = that.crudOptions.filterSecurityExtractToken(token);
+
+  let dataGroup = await  that['groupService'].model.find().where({
+    members:userId
+  })
+  let listReaderRoles = [];
+  dataGroup.forEach((dataItem) => {
+    dataItem.permissions.forEach((permission) => {
+      if(listReaderRoles.includes((dataSubItem) => {
+        return dataSubItem === permission;
+      }) === false){
+        listReaderRoles.push(permission);
+      }
+    });
+  });
+  let permissionDeleteRoles = false;
+  if(data.permissionDeleteUserId.includes(userId) === true) {
+    permissionDeleteRoles = true;
+  }
+  listReaderRoles.forEach((dataItem) => {
+    if(data.permissionDeleteRoles.includes(dataItem) === true) {
+      permissionDeleteRoles = true;
+    }
+  });
+  if(that.crudOptions.filterSecurityDeleteFunction) {
+    permissionDeleteRoles = that.crudOptions.filterSecurityDeleteFunction(userId,permissionDeleteRoles)
+  }
+  return permissionDeleteRoles;
+}
+async function checkPropertyPermissions(select, Req, that){
+  if(select === null){
+    select = '';
+  }
+  let token = "";
+  let userId = "";
+  if(that.crudOptions.filterSecurityHeaderCookieOption === true) {
+    token = getValueFromCookie(Req.headers.cookie)[that.crudOptions.filterSecurityHeaderKey];
+  } else {
+    token = Req.headers[that.crudOptions.filterSecurityHeaderKey];
+  }
+  userId = that.crudOptions.filterSecurityExtractToken(token);
+
+  let dataGroup = await  that['groupService'].model.find().where({
+    members:userId
+  })
+  let listReaderRoles = [];
+  dataGroup.forEach((dataItem) => {
+    dataItem.permissions.forEach((permission) => {
+      if(listReaderRoles.includes((dataSubItem) => {
+        return dataSubItem === permission;
+      }) === false){
+        listReaderRoles.push(permission);
+      }
+    });
+  });
+
+    for(let permissionDataItem in that.crudOptions.filterSecurityPropertiesRoles){
+      let permissionForField = false;
+        listReaderRoles.forEach((roleDataItem) => {
+         if(that.crudOptions.filterSecurityPropertiesRoles[permissionDataItem].includes(roleDataItem) === true){
+          permissionForField = true;
+         }
+        });
+      if(permissionForField === false) {
+        if(select.indexOf(permissionDataItem) !== -1){
+          select = select.replace(permissionDataItem, '');
+        }
+        select = select + ' -' + permissionDataItem;
+      }
+    }
+
+  return select;
 }

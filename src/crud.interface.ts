@@ -41,9 +41,15 @@ export interface CrudOptions {
   filterSecurity?:boolean,
   filterSecurityGroupModel?:any,
   filterSecurityFunction?:any,
+  filterSecurityFindAllFunction?:any,
+  filterSecurityFindOneFunction?:any,
+  filterSecurityCreateFunction?:any,
+  filterSecurityUpdateFunction?:any,
+  filterSecurityDeleteFunction?:any,
   filterSecurityHeaderCookieOption?:boolean,
   filterSecurityHeaderKey?:string,
-  filterSecurityExtractToken?:any
+  filterSecurityExtractToken?:any,
+  filterSecurityPropertiesRoles?: any
 }
 export interface OptionItem {
   text: string
